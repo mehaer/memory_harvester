@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatGPT Memory Harvester</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Memory Harvester</h1>
+      <div class="status-badge" id="statusBadge">Idle</div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="setup">Setup</button>
+      <button class="tab" data-tab="results">Results</button>
+      <button class="tab" data-tab="memory">Memory</button>
+      <button class="tab" data-tab="log">Log</button>
+    </nav>
+
+    <!-- ── Setup tab ── -->
+    <div class="tab-panel active" id="tab-setup">
+      <section class="section">
+        <h2>Config</h2>
+        <label>Messages per chat (before new chat)
+          <input type="number" id="cfgMessagesPerChat" value="5" min="1" max="100" />
+        </label>
+        <label>Delay between messages (ms)
+          <input type="number" id="cfgDelayMessages" value="3000" min="500" step="500" />
+        </label>
+        <label>Delay between chats (ms)
+          <input type="number" id="cfgDelayChats" value="2000" min="500" step="500" />
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="cfgExtractPerBatch" checked />
+          Extract &amp; clear memory after each batch
+        </label>
+      </section>
+
+      <section class="section">
+        <h2>Batches
+          <button class="btn-small" id="addBatchBtn">+ Batch</button>
+        </h2>
+        <div id="batchList"></div>
+      </section>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="startBtn">▶ Start</button>
+        <button class="btn btn-danger" id="stopBtn" disabled>■ Stop</button>
+      </div>
+
+      <div class="progress-area" id="progressArea" style="display:none">
+        <div class="progress-label" id="progressLabel">Batch 0/0 · Prompt 0/0</div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </div>
+
+    <!-- ── Results tab ── -->
+    <div class="tab-panel" id="tab-results">
+      <div class="results-header">
+        <span id="resultsCount">0 responses collected</span>
+        <div>
+          <button class="btn-small" id="exportJsonBtn">Export JSON</button>
+          <button class="btn-small btn-danger-small" id="clearResultsBtn">Clear</button>
+        </div>
+      </div>
+      <div id="resultsList" class="results-list"></div>
+    </div>
+
+    <!-- ── Memory tab ── -->
+    <div class="tab-panel" id="tab-memory">
+      <div class="results-header">
+        <span id="memoryCount">0 extractions</span>
+        <button class="btn-small" id="exportMemoryBtn">Export JSON</button>
+      </div>
+      <div id="memoryList" class="results-list"></div>
+    </div>
+
+    <!-- ── Log tab ── -->
+    <div class="tab-panel" id="tab-log">
+      <div class="results-header">
+        <span>Activity log</span>
+        <button class="btn-small" id="clearLogBtn">Clear</button>
+      </div>
+      <div id="logList" class="log-list"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
