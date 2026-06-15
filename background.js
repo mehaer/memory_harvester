@@ -2,6 +2,7 @@
 
 const CHATGPT_URL = 'https://chatgpt.com/';
 const MEMORY_SETTINGS_URL = 'https://chatgpt.com/#settings/Personalization';
+const DATA_CONTROLS_URL = 'https://chatgpt.com/#settings/DataControls';
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -130,32 +131,66 @@ async function runBatch(batch, batchIndex, config) {
 }
 
 async function extractAndClearMemory(batchIndex) {
-  log('Navigating to memory settings…');
+  // ── Step 1: Scrape memory ────────────────────────────────────────────────
+  log(`[Batch ${batchIndex + 1}] Navigating to memory settings…`);
   await navigateTab(MEMORY_SETTINGS_URL);
-  await sleep(2000);
+  await sleep(2500);
+
+  try {
+    await sendToContent(state.tabId, { action: 'OPEN_MANAGE_MEMORY' });
+    await sleep(1000);
+  } catch (e) {
+    log(`[Batch ${batchIndex + 1}] Could not open Manage Memory panel: ${e.message}`);
+  }
 
   let memories = [];
   try {
     const res = await sendToContent(state.tabId, { action: 'SCRAPE_MEMORY' });
     memories = res.memories || [];
   } catch (e) {
-    log('Memory scrape failed: ' + e.message);
+    log(`[Batch ${batchIndex + 1}] Memory scrape failed: ${e.message}`);
   }
 
   state.memoryExtracts.push({ batchIndex, memories, timestamp: Date.now() });
-  log(`Extracted ${memories.length} memory items for batch ${batchIndex + 1}.`);
+  log(`[Batch ${batchIndex + 1}] Memory snapshot — ${memories.length} item(s):`);
+  memories.forEach((m, i) => log(`  [Batch ${batchIndex + 1}] #${i + 1}: ${m}`));
 
+  // ── Step 2: Delete & disable memory via 3-dot menu ───────────────────────
   try {
     await sendToContent(state.tabId, { action: 'CLEAR_MEMORY' });
-    log('Memory cleared.');
+    log(`[Batch ${batchIndex + 1}] Memory deleted and disabled.`);
   } catch (e) {
-    log('Memory clear failed: ' + e.message);
+    log(`[Batch ${batchIndex + 1}] Memory clear failed: ${e.message}`);
+  }
+
+  // ── Step 3: Delete all chats via Data Controls ───────────────────────────
+  log(`[Batch ${batchIndex + 1}] Navigating to Data Controls to delete all chats…`);
+  await navigateTab(DATA_CONTROLS_URL);
+  await sleep(2500);
+
+  try {
+    await sendToContent(state.tabId, { action: 'DELETE_ALL_CHATS' });
+    log(`[Batch ${batchIndex + 1}] All chats deleted.`);
+  } catch (e) {
+    log(`[Batch ${batchIndex + 1}] Delete all chats failed: ${e.message}`);
+  }
+
+  // ── Step 4: Re-enable memory for the next batch ──────────────────────────
+  log(`[Batch ${batchIndex + 1}] Re-enabling memory…`);
+  await navigateTab(MEMORY_SETTINGS_URL);
+  await sleep(2500);
+
+  try {
+    await sendToContent(state.tabId, { action: 'REENABLE_MEMORY' });
+    log(`[Batch ${batchIndex + 1}] Memory re-enabled.`);
+  } catch (e) {
+    log(`[Batch ${batchIndex + 1}] Memory re-enable failed: ${e.message}`);
   }
 
   await saveState();
   broadcastStatus();
 
-  // Return to ChatGPT main page
+  // Return to fresh chat
   await navigateTab(CHATGPT_URL);
   await sleep(1500);
 }
@@ -186,6 +221,12 @@ async function runAllBatches(batches, config) {
 
     log(`Starting batch ${bi + 1}/${batches.length}`);
     await runBatch(batches[bi], bi, config);
+
+    if (!state.running) break;
+
+    if (config.extractPerBatch) {
+      await extractAndClearMemory(bi);
+    }
 
     if (!state.running) break;
   }
