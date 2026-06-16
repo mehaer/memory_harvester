@@ -75,8 +75,20 @@ function waitForTabLoad(tabId, timeout = 20000) {
 }
 
 async function navigateTab(url) {
+  // Hash-only navigation on the same origin doesn't fire tabs.onUpdated 'complete'.
+  // For settings URLs we just update the tab and sleep so the modal can render.
+  const currentTab = await chrome.tabs.get(state.tabId).catch(() => null);
+  const currentBase = currentTab?.url?.split('#')[0] ?? '';
+  const targetBase = url.split('#')[0];
+  const isHashNav = currentBase === targetBase || (url.includes('#') && isChatGPTUrl(currentBase));
+
   await chrome.tabs.update(state.tabId, { url });
-  await waitForTabLoad(state.tabId);
+
+  if (isHashNav) {
+    await sleep(3000); // give the settings modal time to render
+  } else {
+    await waitForTabLoad(state.tabId);
+  }
 }
 
 // ── Messaging helpers ─────────────────────────────────────────────────────────
@@ -110,19 +122,18 @@ async function runBatch(batch, batchIndex, config) {
     broadcastStatus();
 
     const prompt = batch.prompts[pi];
-
     log(`Batch ${batchIndex + 1}, prompt ${pi + 1}/${batch.prompts.length}: ${prompt.slice(0, 60)}…`);
 
-    const res = await sendToContent(state.tabId, { action: 'SEND_MESSAGE', text: prompt });
+    let reply = '';
+    try {
+      const res = await sendToContent(state.tabId, { action: 'SEND_MESSAGE', text: prompt });
+      reply = res.reply || '';
+    } catch (e) {
+      log(`Batch ${batchIndex + 1}, prompt ${pi + 1}: send failed — ${e.message}`);
+      reply = `[error: ${e.message}]`;
+    }
 
-    state.results.push({
-      batchIndex,
-      promptIndex: pi,
-      prompt,
-      reply: res.reply,
-      timestamp: Date.now(),
-    });
-
+    state.results.push({ batchIndex, promptIndex: pi, prompt, reply, timestamp: Date.now() });
     await saveState();
     broadcastStatus();
 
@@ -131,18 +142,18 @@ async function runBatch(batch, batchIndex, config) {
 }
 
 async function extractAndClearMemory(batchIndex) {
-  // ── Step 1: Scrape memory ────────────────────────────────────────────────
-  log(`[Batch ${batchIndex + 1}] Navigating to memory settings…`);
-  await navigateTab(MEMORY_SETTINGS_URL);
-  await sleep(2500);
+  // ── Step 1: Open memory via profile → Personalization → Manage ──────────
+  log(`[Batch ${batchIndex + 1}] Opening memory overview…`);
+  await navigateTab(CHATGPT_URL);
+  await sleep(2000);
 
   try {
     await sendToContent(state.tabId, { action: 'OPEN_MANAGE_MEMORY' });
-    await sleep(1000);
   } catch (e) {
     log(`[Batch ${batchIndex + 1}] Could not open Manage Memory panel: ${e.message}`);
   }
 
+  // ── Step 2: Scrape memory ────────────────────────────────────────────────
   let memories = [];
   try {
     const res = await sendToContent(state.tabId, { action: 'SCRAPE_MEMORY' });
@@ -155,7 +166,7 @@ async function extractAndClearMemory(batchIndex) {
   log(`[Batch ${batchIndex + 1}] Memory snapshot — ${memories.length} item(s):`);
   memories.forEach((m, i) => log(`  [Batch ${batchIndex + 1}] #${i + 1}: ${m}`));
 
-  // ── Step 2: Delete & disable memory via 3-dot menu ───────────────────────
+  // ── Step 3: Delete and turn off memory via triple-dot menu ───────────────
   try {
     await sendToContent(state.tabId, { action: 'CLEAR_MEMORY' });
     log(`[Batch ${batchIndex + 1}] Memory deleted and disabled.`);
@@ -163,7 +174,12 @@ async function extractAndClearMemory(batchIndex) {
     log(`[Batch ${batchIndex + 1}] Memory clear failed: ${e.message}`);
   }
 
-  // ── Step 3: Delete all chats via Data Controls ───────────────────────────
+  // ── Step 4: Refresh — required for re-enable toggle to appear ────────────
+  log(`[Batch ${batchIndex + 1}] Refreshing page after memory deletion…`);
+  await navigateTab(CHATGPT_URL);
+  await sleep(2000);
+
+  // ── Step 5: Delete all chats via Data Controls ───────────────────────────
   log(`[Batch ${batchIndex + 1}] Navigating to Data Controls to delete all chats…`);
   await navigateTab(DATA_CONTROLS_URL);
   await sleep(2500);
@@ -175,10 +191,10 @@ async function extractAndClearMemory(batchIndex) {
     log(`[Batch ${batchIndex + 1}] Delete all chats failed: ${e.message}`);
   }
 
-  // ── Step 4: Re-enable memory for the next batch ──────────────────────────
+  // ── Step 6: Re-enable memory via profile → Personalization → toggle ──────
   log(`[Batch ${batchIndex + 1}] Re-enabling memory…`);
-  await navigateTab(MEMORY_SETTINGS_URL);
-  await sleep(2500);
+  await navigateTab(CHATGPT_URL);
+  await sleep(2000);
 
   try {
     await sendToContent(state.tabId, { action: 'REENABLE_MEMORY' });
@@ -190,7 +206,7 @@ async function extractAndClearMemory(batchIndex) {
   await saveState();
   broadcastStatus();
 
-  // Return to fresh chat
+  // Return to a fresh chat for the next batch
   await navigateTab(CHATGPT_URL);
   await sleep(1500);
 }

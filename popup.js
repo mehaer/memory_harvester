@@ -157,7 +157,7 @@ function applyStatus(status) {
   document.getElementById('progressLabel').textContent =
     `Batch ${status.currentBatchIndex + 1} · Prompt ${status.currentPromptIndex + 1} · ${status.resultsCount} collected`;
 
-  if (currentTab === 'results') refreshResults();
+  if (currentTab === 'results' || currentTab === 'memory') refreshResults();
 }
 
 // ── Results display ──────────────────────────────────────────────────────────
