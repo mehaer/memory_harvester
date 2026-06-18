@@ -151,6 +151,7 @@ function applyStatus(status) {
     `Batch ${status.currentBatchIndex + 1} · ${status.resultsCount} collected`;
 
   if (currentTab === 'results') refreshResults();
+  if (currentTab === 'log') refreshLog();
 }
 
 // ── Results display ──────────────────────────────────────────────────────────

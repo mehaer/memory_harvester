@@ -20,6 +20,44 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// ── Human-timing simulation ──────────────────────────────────────────────────
+
+// Box-Muller: returns a sample from the standard normal N(0,1)
+function gaussianRandom() {
+  let u;
+  do { u = Math.random(); } while (u === 0); // avoid log(0)
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+// Log-normal sample with the given mean (ms) and coefficient of variation.
+// CV controls spread: CV=0.4 → moderate, CV=0.5 → wider.
+// Being log-normal it is always positive and naturally right-skewed — occasional
+// longer pauses happen more than shorter ones, just like real human behaviour.
+function lognormalMs(meanMs, cv) {
+  const sigma2 = Math.log(1 + cv * cv);
+  const mu = Math.log(meanMs) - sigma2 / 2;
+  return Math.exp(mu + Math.sqrt(sigma2) * gaussianRandom());
+}
+
+// Delay before clicking send: simulates the user thinking + typing the message.
+// mean = (words / 70 WPM) * 2  (×2 = thinking overhead on top of raw typing time)
+// Floored at 800 ms so even 1-word replies aren't instant.
+function humanTypingDelay(text) {
+  const words = Math.max(1, text.trim().split(/\s+/).filter(Boolean).length);
+  const meanMs = (words / 70) * 2 * 60_000; // minutes → ms
+  return Math.max(800, lognormalMs(meanMs, 0.4));
+}
+
+// Delay before a button press / UI interaction: mean ~1 s, floored at 300 ms.
+// CV=0.5 gives a wider spread — some clicks are quick, some involve a pause.
+function humanClickDelay() {
+  return Math.max(300, lognormalMs(1000, 0.5));
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 function waitForElement(selector, timeout = 15000) {
   return new Promise((resolve, reject) => {
     const el = document.querySelector(selector);
@@ -139,7 +177,11 @@ async function sendMessage(text) {
     bgLog(`sendMessage: after fallback, text in input="${afterFallback.slice(0, 60)}"`);
   }
 
-  await new Promise(r => setTimeout(r, 300));
+  // Simulate thinking + typing time before hitting send
+  const typingMs = humanTypingDelay(text);
+  bgLog(`sendMessage: simulating typing delay ${(typingMs / 1000).toFixed(1)} s…`);
+  await sleep(typingMs);
+
   bgLog('sendMessage: waiting for send button to be enabled…');
   const sendBtn = await waitForEnabledSendButton();
   bgLog('sendMessage: clicking send button.');
@@ -169,14 +211,50 @@ function waitForEnabledSendButton(timeout = 10000) {
 // staying on whatever page/chat we were already on.
 async function openProjectsPanel() {
   bgLog('openProjectsPanel: looking for Projects nav item…');
-  const projectsLink = document.querySelector('a[href="/projects"]')
-    || findByText('a, button, div[role="button"]', /^projects$/i);
-  if (!projectsLink) throw new Error('Projects nav item not found');
+
+  // Wait for the sidebar to render and the Projects link to appear.
+  // Try the href selector first, then fall back to text matching.
+  let projectsLink = null;
+
+  try {
+    projectsLink = await waitForElement('a[href="/projects"]', 8000);
+    bgLog('openProjectsPanel: found Projects link via href.');
+  } catch (_) {}
+
+  if (!projectsLink) {
+    bgLog('openProjectsPanel: href selector missed, trying text search…');
+    try {
+      projectsLink = await waitForTextEl(
+        'a, button, div[role="button"], nav li, [class*="nav"] *',
+        /^projects$/i,
+        8000,
+      );
+      bgLog('openProjectsPanel: found Projects link via text match.');
+    } catch (_) {}
+  }
+
+  if (!projectsLink) {
+    // Last resort: any element whose text is exactly "Projects"
+    projectsLink = [...document.querySelectorAll('*')]
+      .find(el => el.children.length === 0 && /^projects$/i.test(el.textContent.trim()));
+    if (projectsLink) bgLog('openProjectsPanel: found Projects link via full-DOM leaf search.');
+  }
+
+  if (!projectsLink) {
+    // Log visible nav links to help diagnose
+    const navLinks = [...document.querySelectorAll('nav a, nav button, [class*="sidebar"] a')]
+      .map(el => `"${el.textContent.trim()}"`)
+      .filter(Boolean)
+      .slice(0, 20);
+    throw new Error(`Projects nav item not found. Nav items: [${navLinks.join(', ')}]`);
+  }
+
+  await sleep(humanClickDelay());
   projectsLink.click();
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise(r => setTimeout(r, 1000));
 
   bgLog('openProjectsPanel: confirming Projects list page loaded…');
-  await waitForTextEl('h1, h2', /^projects$/i, 6000).catch(() => {
+  await waitForTextEl('h1, h2', /^projects$/i, 8000).catch(() => {
     throw new Error('Clicked Projects but the Projects list page never loaded');
   });
   bgLog('openProjectsPanel: Projects list page confirmed.');
@@ -186,6 +264,7 @@ async function openProjectsPanel() {
 async function clickNewProject() {
   bgLog('clickNewProject: looking for New project button…');
   const newBtn = await waitForTextEl('button, a, div[role="button"]', /^new project$|^new$/i);
+  await sleep(humanClickDelay());
   newBtn.click();
   await new Promise(r => setTimeout(r, 800));
   bgLog('clickNewProject: clicked New.');
@@ -210,6 +289,7 @@ async function openProjectSettingsGear() {
   }
 
   if (!gearBtn) throw new Error('Project settings gear icon not found');
+  await sleep(humanClickDelay());
   gearBtn.click();
   await new Promise(r => setTimeout(r, 500));
   bgLog('openProjectSettingsGear: clicked gear icon.');
@@ -237,38 +317,95 @@ async function setProjectOnlyMemory() {
 
   if (!heading) throw new Error('Memory option "Project-only" not found');
 
+  await sleep(humanClickDelay());
   heading.click();
   bgLog('setProjectOnlyMemory: clicked "Project-only" option.');
 }
 
-// Step: type the project name. Clicking "New project" already places the cursor in the
-// name field, so we type into whatever's currently focused rather than re-querying for it.
+// Step: type the project name.
+// The "Search projects" box is also an input[type="text"] on this page, so we
+// can NOT use a generic input selector — we must find the input that is adjacent
+// to the "Project name" label inside the create-project dialog.
 async function typeProjectName(name) {
-  bgLog(`typeProjectName: typing "${name}"…`);
-  let target = document.activeElement;
-  if (!target || !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-    target = document.querySelector('[role="dialog"] input, [role="dialog"] textarea, [role="dialog"] [contenteditable="true"]');
+  bgLog('typeProjectName: waiting for "Project name" label in create dialog…');
+
+  let target = null;
+  const deadline = Date.now() + 8000;
+
+  while (Date.now() < deadline) {
+    // Find the label element whose own text is "Project name"
+    const labelEl = [...document.querySelectorAll('label, div, span, p, h1, h2, h3')]
+      .find(el => /^project name$/i.test(el.textContent.trim()));
+
+    if (labelEl) {
+      // Walk up to the nearest containing block and find the input inside it
+      let container = labelEl.parentElement;
+      while (container && !container.querySelector('input')) {
+        container = container.parentElement;
+      }
+      target = container?.querySelector('input');
+      if (target) {
+        bgLog('typeProjectName: found input via "Project name" label.');
+        break;
+      }
+    }
+    await sleep(200);
   }
-  if (!target) throw new Error('Project name field not found/focused');
 
-  target.focus();
-  document.execCommand('selectAll', false, null);
-  document.execCommand('delete', false, null);
-  document.execCommand('insertText', false, name);
+  if (!target) throw new Error('Project name field not found (no "Project name" label located)');
 
-  await new Promise(r => setTimeout(r, 200));
-  const after = (target.value !== undefined ? target.value : (target.innerText || target.textContent)) || '';
+  // Simulate thinking + typing delay for the project name
+  const nameTypingMs = humanTypingDelay(name);
+  bgLog(`typeProjectName: simulating name-typing delay ${(nameTypingMs / 1000).toFixed(1)} s…`);
+  await sleep(nameTypingMs);
+
+  // Click the field to properly focus it (triggers React's onFocus handlers)
+  dispatchRealClick(target);
+  await sleep(200);
+
+  // Reset React's internal value tracker so it detects the change and enables Create
+  if (target._valueTracker) target._valueTracker.setValue('');
+
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype, 'value'
+  )?.set;
+  if (nativeSetter) {
+    nativeSetter.call(target, name);
+  } else {
+    target.value = name;
+  }
+
+  target.dispatchEvent(new InputEvent('input', {
+    bubbles: true, cancelable: true, inputType: 'insertText', data: name,
+  }));
+  target.dispatchEvent(new Event('change', { bubbles: true }));
+
+  await sleep(300);
+  const after = target.value || '';
   bgLog(`typeProjectName: field now reads "${after.trim()}".`);
   return target;
 }
 
 // Step: click "Create project" to submit the popup.
-// (A synthetic Enter keypress doesn't trigger native form submission since it's
-// not a browser-trusted event, so we click the actual button instead.)
+// Waits for the button to be both present AND enabled — the button stays disabled
+// until React sees a valid (non-empty) project name in its state.
 async function clickCreateProject() {
-  bgLog('clickCreateProject: looking for Create button…');
-  const btn = await waitForTextEl('button', /^create project$|^create$/i);
-  btn.click();
+  bgLog('clickCreateProject: waiting for Create button to be enabled…');
+
+  const deadline = Date.now() + 10000;
+  let btn = null;
+  while (Date.now() < deadline) {
+    btn = findByText('button', /^create project$|^create$/i);
+    if (btn && !btn.disabled) break;
+    await sleep(300);
+  }
+
+  if (!btn) throw new Error('Create project button not found');
+  if (btn.disabled) bgLog('clickCreateProject: WARNING — button still disabled, clicking anyway');
+
+  bgLog('clickCreateProject: button enabled, clicking…');
+  await sleep(humanClickDelay());
+  dispatchRealClick(btn);
   await new Promise(r => setTimeout(r, 1500));
   bgLog('clickCreateProject: clicked Create.');
 }
@@ -282,7 +419,10 @@ async function createProject(name) {
   await setProjectOnlyMemory();
   await clickCreateProject();
 
-  await waitForElement(SELECTORS.input, 15000);
+  // Wait for the page to navigate away from /projects and show a chat input.
+  // The exact URL after creation varies, so we just wait for the textarea.
+  bgLog('createProject: waiting for chat input after project creation…');
+  await waitForElement(SELECTORS.input, 30000);
   bgLog(`createProject: project "${name}" created and chat input ready.`);
 }
 
@@ -334,6 +474,7 @@ async function openProjectAndStartNewChat(name) {
 
   const href = cardLink.getAttribute ? cardLink.getAttribute('href') : null;
   bgLog(`openProjectAndStartNewChat: clicking project card (tag=${cardLink.tagName}, href=${href}).`);
+  await sleep(humanClickDelay());
   dispatchRealClick(cardLink);
 
   // Verify we landed on the project HOME via the URL — the project home path ends in
