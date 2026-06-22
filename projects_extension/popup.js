@@ -27,8 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addPersonaBtn').addEventListener('click', addPersona);
 
   // Persist settings on change
-  ['cfgPersonaStartIndex', 'cfgDelayMessages', 'cfgDelayChats']
+  ['cfgPersonaStartIndex']
     .forEach(id => document.getElementById(id).addEventListener('input', saveSettings));
+  document.getElementById('cfgTestingMode').addEventListener('change', saveSettings);
 
   // JSON import
   document.getElementById('importFile').addEventListener('change', importFromFile);
@@ -133,8 +134,8 @@ function renderPersonas() {
         savePersonas();
       });
       row.querySelector('[data-turns]').addEventListener('input', e => {
-        personas[pi].chats[ci].turns = parseInt(e.target.value) || 4;
-        savePersonas();
+        const v = parseInt(e.target.value);
+        if (!isNaN(v) && v >= 1) { personas[pi].chats[ci].turns = v; savePersonas(); }
       });
     });
   });
@@ -159,8 +160,7 @@ function saveSettings() {
   chrome.storage.local.set({
     personaHarvesterSettings: {
       personaStartIndex: document.getElementById('cfgPersonaStartIndex').value,
-      delayMessages: document.getElementById('cfgDelayMessages').value,
-      delayChats: document.getElementById('cfgDelayChats').value,
+      testingMode: document.getElementById('cfgTestingMode').checked,
     },
   });
 }
@@ -169,9 +169,8 @@ function loadSettings() {
   chrome.storage.local.get(['personaHarvesterSettings'], data => {
     const s = data.personaHarvesterSettings;
     if (!s) return;
-    if (s.personaStartIndex) document.getElementById('cfgPersonaStartIndex').value = s.personaStartIndex;
-    if (s.delayMessages) document.getElementById('cfgDelayMessages').value = s.delayMessages;
-    if (s.delayChats) document.getElementById('cfgDelayChats').value = s.delayChats;
+    if (s.personaStartIndex != null) document.getElementById('cfgPersonaStartIndex').value = s.personaStartIndex;
+    if (s.testingMode != null) document.getElementById('cfgTestingMode').checked = s.testingMode;
   });
 }
 
@@ -258,8 +257,7 @@ function downloadTemplate() {
 function getConfig() {
   return {
     personaStartIndex: parseInt(document.getElementById('cfgPersonaStartIndex').value) || 1,
-    delayBetweenMessages: parseInt(document.getElementById('cfgDelayMessages').value) || 3000,
-    delayBetweenChats: parseInt(document.getElementById('cfgDelayChats').value) || 2000,
+    testingMode: document.getElementById('cfgTestingMode').checked,
   };
 }
 
@@ -364,7 +362,7 @@ function renderResults(results) {
 // simulator originally wrote vs. what was actually sent.
 function renderVerification(v) {
   if (!v) return '';
-  const cls = v.approved ? 'verdict-ok' : (v.usedRevision ? 'verdict-revised' : 'verdict-flagged');
+  const cls = v.approved === null ? 'verdict-flagged' : v.approved ? 'verdict-ok' : (v.usedRevision ? 'verdict-revised' : 'verdict-flagged');
   const revisedNote = v.usedRevision
     ? `<div class="verify-original">orig: ${escHtml((v.original || '').slice(0, 160))}${(v.original || '').length > 160 ? '…' : ''}</div>`
     : '';
@@ -419,7 +417,7 @@ function downloadJson(data, filename) {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────

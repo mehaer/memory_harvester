@@ -174,7 +174,7 @@ async function openaiChat(messages, opts = {}) {
     throw err;
   }
   const data = await res.json();
-  return (data.choices && data.choices[0] && data.choices[0].message.content || '').trim();
+  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
 }
 
 function callSimulator(messages) {
@@ -224,7 +224,8 @@ async function verifyDraft(draft, personaDescription, criterion) {
   let parsed;
   try { parsed = JSON.parse(content); } catch (_) { parsed = null; }
   if (!parsed || typeof parsed !== 'object') {
-    return { approved: true, reason: 'verifier output unparseable — passing through', revised: '' };
+    log(`verifyDraft: could not parse verifier JSON — treating as UNVERIFIED. Raw: ${String(content).slice(0, 100)}`);
+    return { approved: null, verdict: 'UNVERIFIED', reason: 'verifier output unparseable', revised: '' };
   }
   return {
     approved: parsed.approved !== false,
@@ -269,11 +270,14 @@ async function runSimulatedChat(persona, chat, personaName, batchIndex, chatInde
     if (VERIFY_DRAFTS) {
       try {
         const v = await verifyDraft(humanText, persona.description, chat.criterion);
+        if (!state.running) { log('Stopped by user.'); return; }
         const original = humanText;
-        const usedRevision = !v.approved && !!(v.revised && v.revised.trim());
+        const usedRevision = v.approved === false && !!(v.revised && v.revised.trim());
         if (usedRevision) humanText = v.revised.trim();
 
-        const verdict = v.approved ? 'APPROVED' : (usedRevision ? 'REVISED' : 'FLAGGED (no rewrite — using original)');
+        const verdict = v.approved === null ? 'UNVERIFIED'
+          : v.approved ? 'APPROVED'
+          : (usedRevision ? 'REVISED' : 'FLAGGED (no rewrite — using original)');
         verification = { verdict, approved: v.approved, reason: v.reason, original, sent: humanText, usedRevision };
         log(`${personaName} chat ${chatIndex + 1}, turn ${turn + 1} — verifier: ${verdict}${v.reason ? ' — ' + v.reason.slice(0, 140) : ''}`);
       } catch (e) {
@@ -310,7 +314,7 @@ async function runSimulatedChat(persona, chat, personaName, batchIndex, chatInde
     messages.push({ role: 'user', content: reply });
 
     if (ended) { log(`${personaName} chat ${chatIndex + 1}: simulator wrapped up early.`); return; }
-    if (turn < target - 1) await sleep(config.delayBetweenMessages);
+    if (turn < target - 1) await sleep(config.testingMode ? 3000 : 8000);
   }
 }
 
@@ -328,7 +332,7 @@ async function runPersona(persona, batchIndex, personaName, config) {
         log(`Opening new chat in "${personaName}" failed: ${e.message} — skipping remaining chats.`);
         return;
       }
-      await sleep(config.delayBetweenChats);
+      await sleep(config.testingMode ? 5000 : 12000);
     }
 
     await runSimulatedChat(persona, persona.chats[ci], personaName, batchIndex, ci, config);
@@ -336,9 +340,14 @@ async function runPersona(persona, batchIndex, personaName, config) {
 }
 
 async function runAllPersonas(personas, config) {
-  log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}`);
+  log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}${config.testingMode ? ', testing mode ON' : ''}`);
   await ensureChatGPTTab();
   await ensureContentScript();
+  try {
+    await sendToContent(state.tabId, { action: 'SET_CONFIG', testingMode: !!config.testingMode });
+  } catch (e) {
+    log(`SET_CONFIG failed (${e.message}) — reload the ChatGPT tab to apply timing mode.`);
+  }
 
   for (let bi = 0; bi < personas.length; bi++) {
     if (!state.running) break;

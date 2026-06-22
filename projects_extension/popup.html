@@ -27,11 +27,9 @@
         <label>Persona # to start at
           <input type="number" id="cfgPersonaStartIndex" value="1" min="1" />
         </label>
-        <label>Delay between messages (ms)
-          <input type="number" id="cfgDelayMessages" value="3000" min="500" step="500" />
-        </label>
-        <label>Delay between chats (ms)
-          <input type="number" id="cfgDelayChats" value="2000" min="500" step="500" />
+        <label class="toggle-label">
+          <input type="checkbox" id="cfgTestingMode" />
+          Testing mode — shorter delays (≤ 60 s, ~25–30 s average)
         </label>
       </section>
 

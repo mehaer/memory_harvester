@@ -22,6 +22,8 @@ function escapeRegex(s) {
 
 // ── Human-timing simulation ──────────────────────────────────────────────────
 
+let testingMode = false;
+
 // Box-Muller: returns a sample from the standard normal N(0,1)
 function gaussianRandom() {
   let u;
@@ -40,9 +42,13 @@ function lognormalMs(meanMs, cv) {
 }
 
 // Delay before clicking send: simulates the user thinking + typing the message.
-// mean = (words / 70 WPM) * 2  (×2 = thinking overhead on top of raw typing time)
-// Floored at 800 ms so even 1-word replies aren't instant.
+// Normal mode: mean = (words / 70 WPM) * 2 minutes (thinking + typing overhead).
+// Testing mode: fixed mean of 27 s, capped at 55 s — quick enough to iterate but
+// still humanly variable.
 function humanTypingDelay(text) {
+  if (testingMode) {
+    return Math.min(55_000, Math.max(8_000, lognormalMs(27_000, 0.4)));
+  }
   const words = Math.max(1, text.trim().split(/\s+/).filter(Boolean).length);
   const meanMs = (words / 70) * 2 * 60_000; // minutes → ms
   return Math.max(800, lognormalMs(meanMs, 0.4));
@@ -510,6 +516,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           await waitForResponseComplete();
           const reply = getLastAssistantMessage();
           sendResponse({ ok: true, reply });
+          break;
+        }
+        case 'SET_CONFIG': {
+          testingMode = !!msg.testingMode;
+          bgLog(`SET_CONFIG: testingMode=${testingMode}`);
+          sendResponse({ ok: true });
           break;
         }
         case 'PING': {

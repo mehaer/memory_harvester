@@ -1,0 +1,20 @@
+{
+  "personas": [
+    {
+      "description": "A 32 year old artist in Brooklyn working towards my first exhibition.",
+      "chats": [
+        {
+          "criterion": "ask about running shoes",
+          "turns": 4
+        },
+        {
+          "criterion": "chat about the flea market",
+          "turns": 3
+        },
+        {
+          "turns": 5
+        }
+      ]
+    }
+  ]
+}

@@ -344,3 +344,20 @@ textarea {
 .verdict-revised .verify-badge { color: #d29922; }
 .verdict-flagged { border-left: 3px solid #e5534b; }
 .verdict-flagged .verify-badge { color: #e5534b; }
+
+/* ── Testing mode toggle ─────────────────────────────────────────────────── */
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.toggle-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary, #10a37f);
+  cursor: pointer;
+  flex-shrink: 0;
+}
