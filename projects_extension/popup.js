@@ -2,14 +2,16 @@
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-let batches = [{ prompts: [] }]; // array of { prompts: string[] }
+// personas: [{ description: string, chats: [{ criterion: string, turns: number }] }]
+let personas = [{ description: '', chats: [{ criterion: '', turns: 4 }] }];
 let currentTab = 'setup';
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadSavedBatches();
-  renderBatches();
+  loadSavedPersonas();
+  loadSettings();
+  renderPersonas();
   refreshResults();
   refreshLog();
   pollStatus();
@@ -22,7 +24,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Controls
   document.getElementById('startBtn').addEventListener('click', startAutomation);
   document.getElementById('stopBtn').addEventListener('click', stopAutomation);
-  document.getElementById('addBatchBtn').addEventListener('click', addBatch);
+  document.getElementById('addPersonaBtn').addEventListener('click', addPersona);
+
+  // Persist settings on change
+  ['cfgPersonaStartIndex', 'cfgDelayMessages', 'cfgDelayChats']
+    .forEach(id => document.getElementById(id).addEventListener('input', saveSettings));
+
+  // JSON import
+  document.getElementById('importFile').addEventListener('change', importFromFile);
+  document.getElementById('importTextBtn').addEventListener('click', importFromText);
+  document.getElementById('downloadTemplateBtn').addEventListener('click', downloadTemplate);
 
   // Results tab
   document.getElementById('exportJsonBtn').addEventListener('click', exportResults);
@@ -40,56 +51,206 @@ function switchTab(tab) {
   if (tab === 'log') refreshLog();
 }
 
-// ── Batch editor ─────────────────────────────────────────────────────────────
+// ── Persona / chat editor ──────────────────────────────────────────────────────
 
-function addBatch() {
-  batches.push({ prompts: [] });
-  renderBatches();
-  saveBatches();
+function addPersona() {
+  personas.push({ description: '', chats: [{ criterion: '', turns: 4 }] });
+  renderPersonas();
+  savePersonas();
 }
 
-function removeBatch(i) {
-  batches.splice(i, 1);
-  if (!batches.length) batches.push({ prompts: [] });
-  renderBatches();
-  saveBatches();
+function removePersona(i) {
+  personas.splice(i, 1);
+  if (!personas.length) personas.push({ description: '', chats: [{ criterion: '', turns: 4 }] });
+  renderPersonas();
+  savePersonas();
 }
 
-function renderBatches() {
-  const list = document.getElementById('batchList');
+function addChat(pi) {
+  personas[pi].chats.push({ criterion: '', turns: 4 });
+  renderPersonas();
+  savePersonas();
+}
+
+function removeChat(pi, ci) {
+  personas[pi].chats.splice(ci, 1);
+  if (!personas[pi].chats.length) personas[pi].chats.push({ criterion: '', turns: 4 });
+  renderPersonas();
+  savePersonas();
+}
+
+function renderPersonas() {
+  const list = document.getElementById('personaList');
   list.innerHTML = '';
-  batches.forEach((batch, i) => {
+
+  personas.forEach((persona, pi) => {
     const card = document.createElement('div');
     card.className = 'batch-card';
+
+    const chatsHtml = persona.chats.map((chat, ci) => `
+      <div class="chat-row" data-chat="${ci}">
+        <div class="chat-row-head">
+          <span class="chat-label">Chat ${ci + 1}</span>
+          <button class="btn-small btn-danger-small" data-remove-chat="${ci}">×</button>
+        </div>
+        <label>Criterion (optional — blank = free chat)
+          <textarea data-criterion="${ci}" rows="2" placeholder="e.g. ask about growing tomato plants">${escHtml(chat.criterion)}</textarea>
+        </label>
+        <label>Approx. turns
+          <input type="number" data-turns="${ci}" value="${Number(chat.turns) || 4}" min="1" max="50" />
+        </label>
+      </div>
+    `).join('');
+
     card.innerHTML = `
       <div class="batch-header">
-        <span>Batch ${i + 1}</span>
-        <button class="btn-small btn-danger-small" data-remove="${i}">Remove</button>
+        <span>Persona ${pi + 1}</span>
+        <button class="btn-small btn-danger-small" data-remove-persona="${pi}">Remove</button>
       </div>
-      <label>Prompts (one per line)
-        <textarea data-batch="${i}" placeholder="Enter one prompt per line…" rows="4">${batch.prompts.join('\n')}</textarea>
+      <label>Persona description (who the human is)
+        <textarea data-description placeholder="e.g. A 34-year-old first-time gardener in Oregon, casual and curious…" rows="3">${escHtml(persona.description)}</textarea>
       </label>
+      <div class="chats-wrap">${chatsHtml}</div>
+      <button class="btn-small" data-add-chat="${pi}">+ Chat</button>
     `;
+
     list.appendChild(card);
-    card.querySelector('[data-remove]').addEventListener('click', () => removeBatch(i));
-    card.querySelector('textarea').addEventListener('input', e => {
-      batches[i].prompts = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
-      saveBatches();
+
+    // Persona-level wiring
+    card.querySelector('[data-remove-persona]').addEventListener('click', () => removePersona(pi));
+    card.querySelector('[data-description]').addEventListener('input', e => {
+      personas[pi].description = e.target.value;
+      savePersonas();
+    });
+    card.querySelector('[data-add-chat]').addEventListener('click', () => addChat(pi));
+
+    // Chat-level wiring
+    card.querySelectorAll('.chat-row').forEach(row => {
+      const ci = parseInt(row.dataset.chat);
+      row.querySelector('[data-remove-chat]').addEventListener('click', () => removeChat(pi, ci));
+      row.querySelector('[data-criterion]').addEventListener('input', e => {
+        personas[pi].chats[ci].criterion = e.target.value;
+        savePersonas();
+      });
+      row.querySelector('[data-turns]').addEventListener('input', e => {
+        personas[pi].chats[ci].turns = parseInt(e.target.value) || 4;
+        savePersonas();
+      });
     });
   });
 }
 
-function saveBatches() {
-  chrome.storage.local.set({ personaHarvesterBatches: batches });
+function savePersonas() {
+  chrome.storage.local.set({ personaHarvesterPersonas: personas });
 }
 
-function loadSavedBatches() {
-  chrome.storage.local.get(['personaHarvesterBatches'], data => {
-    if (data.personaHarvesterBatches && data.personaHarvesterBatches.length) {
-      batches = data.personaHarvesterBatches;
-      renderBatches();
+function loadSavedPersonas() {
+  chrome.storage.local.get(['personaHarvesterPersonas'], data => {
+    if (data.personaHarvesterPersonas && data.personaHarvesterPersonas.length) {
+      personas = data.personaHarvesterPersonas;
+      renderPersonas();
     }
   });
+}
+
+// ── Settings persistence ────────────────────────────────────────────────────────
+
+function saveSettings() {
+  chrome.storage.local.set({
+    personaHarvesterSettings: {
+      personaStartIndex: document.getElementById('cfgPersonaStartIndex').value,
+      delayMessages: document.getElementById('cfgDelayMessages').value,
+      delayChats: document.getElementById('cfgDelayChats').value,
+    },
+  });
+}
+
+function loadSettings() {
+  chrome.storage.local.get(['personaHarvesterSettings'], data => {
+    const s = data.personaHarvesterSettings;
+    if (!s) return;
+    if (s.personaStartIndex) document.getElementById('cfgPersonaStartIndex').value = s.personaStartIndex;
+    if (s.delayMessages) document.getElementById('cfgDelayMessages').value = s.delayMessages;
+    if (s.delayChats) document.getElementById('cfgDelayChats').value = s.delayChats;
+  });
+}
+
+// ── JSON import ────────────────────────────────────────────────────────────────
+
+// Accepts either {personas:[…]} or a bare [...] array. Each persona: { description,
+// chats:[{ criterion?, turns? }] }. A missing/blank criterion = free conversation.
+function normalizeImported(raw) {
+  const arr = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.personas) ? raw.personas : null);
+  if (!arr) throw new Error('Expected {"personas":[…]} or a JSON array of personas.');
+
+  return arr.map((p, i) => {
+    if (!p || typeof p !== 'object') throw new Error(`Persona ${i + 1} is not an object.`);
+    const chatsSrc = Array.isArray(p.chats) ? p.chats : [];
+    const chats = chatsSrc.map(c => ({
+      criterion: (c && c.criterion != null) ? String(c.criterion) : '',
+      turns: Math.max(1, parseInt(c && c.turns) || 4),
+    }));
+    return {
+      description: p.description != null ? String(p.description) : '',
+      chats: chats.length ? chats : [{ criterion: '', turns: 4 }],
+    };
+  });
+}
+
+function applyImported(raw) {
+  const imported = normalizeImported(raw);
+  if (!imported.length) throw new Error('No personas found in the JSON.');
+  personas = imported;
+  renderPersonas();
+  savePersonas();
+  setImportStatus(`Imported ${imported.length} persona(s).`, false);
+}
+
+function importFromText() {
+  const text = document.getElementById('importText').value.trim();
+  if (!text) { setImportStatus('Paste some JSON first.', true); return; }
+  try {
+    applyImported(JSON.parse(text));
+  } catch (e) {
+    setImportStatus('Import failed: ' + e.message, true);
+  }
+}
+
+function importFromFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      applyImported(JSON.parse(reader.result));
+    } catch (err) {
+      setImportStatus('Import failed: ' + err.message, true);
+    }
+  };
+  reader.onerror = () => setImportStatus('Could not read the file.', true);
+  reader.readAsText(file);
+  e.target.value = ''; // allow re-importing the same file
+}
+
+function setImportStatus(msg, isError) {
+  const el = document.getElementById('importStatus');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--danger, #e5534b)' : 'var(--text-muted)';
+}
+
+function downloadTemplate() {
+  const template = {
+    personas: [
+      {
+        description: 'A 34-year-old first-time gardener in Oregon, casual and curious.',
+        chats: [
+          { criterion: 'ask about growing tomato plants', turns: 4 },
+          { turns: 3 },
+        ],
+      },
+    ],
+  };
+  downloadJson(template, 'personas-template.json');
 }
 
 // ── Automation controls ───────────────────────────────────────────────────────
@@ -97,19 +258,29 @@ function loadSavedBatches() {
 function getConfig() {
   return {
     personaStartIndex: parseInt(document.getElementById('cfgPersonaStartIndex').value) || 1,
-    messagesPerChat: parseInt(document.getElementById('cfgMessagesPerChat').value) || 5,
     delayBetweenMessages: parseInt(document.getElementById('cfgDelayMessages').value) || 3000,
     delayBetweenChats: parseInt(document.getElementById('cfgDelayChats').value) || 2000,
   };
 }
 
 function startAutomation() {
-  const validBatches = batches.filter(b => b.prompts.length > 0);
-  if (!validBatches.length) {
-    alert('Add at least one prompt to a batch before starting.');
+  const config = getConfig();
+
+  // A chat is valid with or without a criterion (blank = free conversation); a persona
+  // is valid as long as it has at least one chat.
+  const validPersonas = personas
+    .map(p => ({
+      description: p.description,
+      chats: p.chats.map(c => ({ criterion: (c.criterion || '').trim(), turns: Math.max(1, parseInt(c.turns) || 4) })),
+    }))
+    .filter(p => p.chats.length > 0);
+
+  if (!validPersonas.length) {
+    alert('Add at least one persona with a chat before starting.');
     return;
   }
-  chrome.runtime.sendMessage({ type: 'START', batches: validBatches, config: getConfig() }, res => {
+
+  chrome.runtime.sendMessage({ type: 'START', personas: validPersonas, config }, res => {
     if (!res?.ok) alert('Failed to start: ' + (res?.error || 'Unknown error'));
   });
 }
@@ -148,7 +319,7 @@ function applyStatus(status) {
   }
 
   document.getElementById('progressLabel').textContent =
-    `Batch ${status.currentBatchIndex + 1} · ${status.resultsCount} collected`;
+    `Persona ${status.currentBatchIndex + 1} · ${status.resultsCount} collected`;
 
   if (currentTab === 'results') refreshResults();
   if (currentTab === 'log') refreshLog();
@@ -166,7 +337,7 @@ function refreshResults() {
 function renderResults(results) {
   const list = document.getElementById('resultsList');
   const count = document.getElementById('resultsCount');
-  count.textContent = `${results.length} response${results.length !== 1 ? 's' : ''} collected`;
+  count.textContent = `${results.length} turn${results.length !== 1 ? 's' : ''} collected`;
 
   if (!results.length) {
     list.innerHTML = '<div class="empty">No results yet</div>';
@@ -178,13 +349,31 @@ function renderResults(results) {
   [...results].reverse().forEach(r => {
     const card = document.createElement('div');
     card.className = 'result-card';
+    const chatLabel = (r.chatIndex != null ? ` · Chat ${r.chatIndex + 1}` : '');
     card.innerHTML = `
-      <div class="meta">${escHtml(r.personaName)} · Prompt ${r.promptIndex + 1} · ${new Date(r.timestamp).toLocaleTimeString()}</div>
-      <div class="prompt-text">${escHtml(r.prompt.slice(0, 120))}${r.prompt.length > 120 ? '…' : ''}</div>
+      <div class="meta">${escHtml(r.personaName)}${chatLabel} · Turn ${r.turnIndex + 1} · ${new Date(r.timestamp).toLocaleTimeString()}</div>
+      ${renderVerification(r.verification)}
+      <div class="prompt-text">${escHtml(r.prompt.slice(0, 160))}${r.prompt.length > 160 ? '…' : ''}</div>
       <div class="reply-text">${escHtml(r.reply || '(no reply)')}</div>
     `;
     list.appendChild(card);
   });
+}
+
+// Show the verifier's verdict + reasoning. If the draft was revised, show what the
+// simulator originally wrote vs. what was actually sent.
+function renderVerification(v) {
+  if (!v) return '';
+  const cls = v.approved ? 'verdict-ok' : (v.usedRevision ? 'verdict-revised' : 'verdict-flagged');
+  const revisedNote = v.usedRevision
+    ? `<div class="verify-original">orig: ${escHtml((v.original || '').slice(0, 160))}${(v.original || '').length > 160 ? '…' : ''}</div>`
+    : '';
+  return `
+    <div class="verify ${cls}">
+      <span class="verify-badge">${escHtml(v.verdict || (v.approved ? 'APPROVED' : 'FLAGGED'))}</span>
+      ${v.reason ? `<span class="verify-reason">${escHtml(v.reason)}</span>` : ''}
+      ${revisedNote}
+    </div>`;
 }
 
 // ── Log display ───────────────────────────────────────────────────────────────

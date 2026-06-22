@@ -23,11 +23,9 @@
     <div class="tab-panel active" id="tab-setup">
       <section class="section">
         <h2>Config</h2>
+        <p class="hint">API key &amp; model are set in <code>config.js</code> (gitignored), not here.</p>
         <label>Persona # to start at
           <input type="number" id="cfgPersonaStartIndex" value="1" min="1" />
-        </label>
-        <label>Messages per chat (before new chat in project)
-          <input type="number" id="cfgMessagesPerChat" value="5" min="1" max="100" />
         </label>
         <label>Delay between messages (ms)
           <input type="number" id="cfgDelayMessages" value="3000" min="500" step="500" />
@@ -38,10 +36,23 @@
       </section>
 
       <section class="section">
-        <h2>Batches
-          <button class="btn-small" id="addBatchBtn">+ Batch</button>
+        <h2>Import from JSON</h2>
+        <p class="hint">Load personas from a JSON file or paste below. Omit a chat's <code>criterion</code> (or leave it blank) for a free, no-specific-topic conversation.</p>
+        <input type="file" id="importFile" accept=".json,application/json" />
+        <textarea id="importText" rows="5" placeholder='{"personas":[{"description":"A first-time gardener","chats":[{"criterion":"ask about growing tomatoes","turns":4},{"turns":3}]}]}'></textarea>
+        <div class="controls">
+          <button class="btn-small" id="importTextBtn">Import pasted JSON</button>
+          <button class="btn-small" id="downloadTemplateBtn">Download template</button>
+        </div>
+        <div class="hint" id="importStatus"></div>
+      </section>
+
+      <section class="section">
+        <h2>Personas
+          <button class="btn-small" id="addPersonaBtn">+ Persona</button>
         </h2>
-        <div id="batchList"></div>
+        <p class="hint">Each persona becomes a Project. The model role-plays the persona and chats with ChatGPT, weaving each chat's criterion in naturally.</p>
+        <div id="personaList"></div>
       </section>
 
       <div class="controls">

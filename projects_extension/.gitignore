@@ -1,0 +1,2 @@
+# Local secrets — never commit the real API key
+config.js

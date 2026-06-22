@@ -279,3 +279,68 @@ textarea {
 .log-entry .log-msg { color: var(--text); }
 
 .empty { color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px; }
+
+/* ── Persona / chat editor ───────────────────────────────────────────────── */
+.hint {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.chats-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.chat-row {
+  background: var(--bg, rgba(0,0,0,0.15));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.chat-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.chat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ── Verifier verdict (results) ──────────────────────────────────────────── */
+.verify {
+  font-size: 10px;
+  line-height: 1.45;
+  margin-bottom: 5px;
+  padding: 5px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.12);
+}
+.verify-badge {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-right: 6px;
+}
+.verify-reason { color: var(--text-muted); }
+.verify-original {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.verdict-ok { border-left: 3px solid #3fb950; }
+.verdict-ok .verify-badge { color: #3fb950; }
+.verdict-revised { border-left: 3px solid #d29922; }
+.verdict-revised .verify-badge { color: #d29922; }
+.verdict-flagged { border-left: 3px solid #e5534b; }
+.verdict-flagged .verify-badge { color: #e5534b; }
