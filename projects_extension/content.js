@@ -42,16 +42,18 @@ function lognormalMs(meanMs, cv) {
 }
 
 // Delay before clicking send: simulates the user thinking + typing the message.
-// Normal mode: mean = (words / 70 WPM) * 2 minutes (thinking + typing overhead).
-// Testing mode: fixed mean of 27 s, capped at 55 s — quick enough to iterate but
-// still humanly variable.
+// Mean = (words / 70 WPM) * 1.3 (30% overhead for reading + thinking).
+// Capped at 90 s so long prompts don't stall the run for minutes.
 function humanTypingDelay(text) {
-  if (testingMode) {
-    return Math.min(55_000, Math.max(8_000, lognormalMs(27_000, 0.4)));
-  }
   const words = Math.max(1, text.trim().split(/\s+/).filter(Boolean).length);
-  const meanMs = (words / 70) * 2 * 60_000; // minutes → ms
-  return Math.max(800, lognormalMs(meanMs, 0.4));
+  const meanMs = (words / 70) * 1.3 * 60_000;
+  return Math.min(90_000, Math.max(1_500, lognormalMs(meanMs, 0.3)));
+}
+
+// Short fixed delay for UI text fields that aren't real messages (e.g. project name).
+// Mean ~1.5 s, capped at 4 s — just enough to look human.
+function humanShortInputDelay() {
+  return Math.min(4_000, Math.max(600, lognormalMs(1_500, 0.3)));
 }
 
 // Delay before a button press / UI interaction: mean ~1 s, floored at 300 ms.
@@ -360,8 +362,7 @@ async function typeProjectName(name) {
 
   if (!target) throw new Error('Project name field not found (no "Project name" label located)');
 
-  // Simulate thinking + typing delay for the project name
-  const nameTypingMs = humanTypingDelay(name);
+  const nameTypingMs = humanShortInputDelay();
   bgLog(`typeProjectName: simulating name-typing delay ${(nameTypingMs / 1000).toFixed(1)} s…`);
   await sleep(nameTypingMs);
 
