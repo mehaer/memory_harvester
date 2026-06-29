@@ -10,7 +10,7 @@ let currentTab = 'setup';
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSavedPersonas();
-  loadSettings();
+  loadSettings();``
   renderPersonas();
   refreshResults();
   refreshLog();
@@ -357,6 +357,7 @@ function renderResults(results) {
       ${renderVerification(r.verification)}
       <div class="prompt-text">${escHtml(r.prompt.slice(0, 160))}${r.prompt.length > 160 ? '…' : ''}</div>
       <div class="reply-text">${escHtml(r.reply || '(no reply)')}</div>
+      ${renderAds(r.ads)}
     `;
     list.appendChild(card);
   });
@@ -376,6 +377,16 @@ function renderVerification(v) {
       ${v.reason ? `<span class="verify-reason">${escHtml(v.reason)}</span>` : ''}
       ${revisedNote}
     </div>`;
+}
+
+// Show any advertisements detected in the response for this turn.
+function renderAds(ads) {
+  if (!Array.isArray(ads) || !ads.length) return '';
+  const items = ads.map(a => {
+    const link = a.url ? ` <a href="${escHtml(a.url)}" target="_blank" rel="noopener">link</a>` : '';
+    return `<div class="ad-item">${escHtml((a.text || '').slice(0, 160))}${(a.text || '').length > 160 ? '…' : ''}${link}</div>`;
+  }).join('');
+  return `<div class="ads"><span class="ad-badge">${ads.length} AD${ads.length > 1 ? 'S' : ''}</span>${items}</div>`;
 }
 
 // ── Log display ───────────────────────────────────────────────────────────────

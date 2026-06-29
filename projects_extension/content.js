@@ -168,6 +168,64 @@ function getLastAssistantMessage() {
   return last.innerText || last.textContent || '';
 }
 
+// ── Advertisement detection ──────────────────────────────────────────────────
+
+// Best-effort detection of advertisements / sponsored content surfaced alongside a
+// ChatGPT response. There is no documented, stable markup for ads, so we scan for the
+// common signals — sponsored/advert/promoted markers in class/testid/aria attributes,
+// and small elements whose own text is exactly "Sponsored"/"Advertisement"/"Ad" — and
+// capture the surrounding block's text + any outbound link. Returns an array of
+// { label, text, url, detectedAt }. Conservative by design: better to miss an exotic
+// ad format than to mislabel ordinary answer content as an ad.
+function detectAds(scopeEl) {
+  const root = scopeEl || document.querySelector('main') || document.body;
+  const ads = [];
+  const seen = new Set();
+
+  const push = (el, label) => {
+    if (!el) return;
+    const text = (el.innerText || el.textContent || '').trim();
+    if (!text) return;
+    const key = text.slice(0, 200);
+    if (seen.has(key)) return;
+    seen.add(key);
+    const linkEl = el.querySelector && el.querySelector('a[href]');
+    const url = linkEl ? linkEl.href : (el.tagName === 'A' && el.href ? el.href : '');
+    ads.push({ label, text: text.slice(0, 1000), url, detectedAt: Date.now() });
+  };
+
+  // 1) Explicit attribute markers (case-insensitive). "ad" alone is too noisy
+  //    (matches "header", "thread", "shadow", …), so we only trust the specific roots.
+  const attrSel = [
+    '[class*="sponsor" i]', '[class*="advert" i]', '[class*="promoted" i]',
+    '[data-testid*="sponsor" i]', '[data-testid*="advert" i]', '[data-testid*="promoted" i]',
+    '[aria-label*="sponsor" i]', '[aria-label*="advertis" i]',
+  ].join(', ');
+  try { root.querySelectorAll(attrSel).forEach(el => push(el, 'attribute-marker')); } catch (_) {}
+
+  // 2) Text-label markers: a leaf element whose own text is exactly a known ad label.
+  //    Capture its nearest container block as the ad rather than the bare label.
+  [...root.querySelectorAll('span, div, p, small, li')].forEach(el => {
+    if (el.children.length) return;
+    const t = (el.textContent || '').trim();
+    if (/^(sponsored|advertisement|ad)$/i.test(t)) {
+      push(el.closest('li, [class], div') || el.parentElement || el, 'label:' + t.toLowerCase());
+    }
+  });
+
+  return ads;
+}
+
+// Scope ad detection to the most recent assistant turn so we attribute ads to the turn
+// that surfaced them, rather than re-reporting earlier ads on every subsequent turn.
+function detectAdsForLastTurn() {
+  const messages = document.querySelectorAll(SELECTORS.assistantMessage);
+  if (!messages.length) return [];
+  const last = messages[messages.length - 1];
+  const scope = last.closest('article') || last.parentElement || last;
+  try { return detectAds(scope); } catch (_) { return []; }
+}
+
 async function sendMessage(text) {
   bgLog('sendMessage: waiting for input element…');
   const input = await waitForElement(SELECTORS.input);
@@ -520,7 +578,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           await sendMessage(msg.text);
           await waitForResponseComplete();
           const reply = getLastAssistantMessage();
-          sendResponse({ ok: true, reply });
+          const ads = detectAdsForLastTurn();
+          if (ads.length) bgLog(`detectAds: ${ads.length} ad(s) found in last turn.`);
+          sendResponse({ ok: true, reply, ads });
           break;
         }
         case 'SET_CONFIG': {

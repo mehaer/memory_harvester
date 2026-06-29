@@ -27,8 +27,37 @@ let state = {
   running: false,
   tabId: null,
   currentBatchIndex: 0,
-  results: [], // { batchIndex, personaName, chatIndex, turnIndex, promptIndex, prompt, reply, timestamp }
+  results: [], // { batchIndex, personaName, chatIndex, turnIndex, promptIndex, prompt, reply, ads, timestamp, verification }
 };
+
+// ── Results persistence (crash failsafe) ──────────────────────────────────────
+// Results live in memory on the service worker, which MV3 can evict at any time
+// (idle eviction, crash, extension reload). We mirror them to chrome.storage.local
+// after every new turn so all progress up to that point survives, and restore them
+// on each cold start so the popup/export still see them.
+
+const RESULTS_STORAGE_KEY = 'personaHarvesterResults';
+
+// Loads any persisted results from a previous (possibly crashed) session. Awaited at
+// the top of the message handler so reads/clears never race ahead of the restore.
+let restorePromise = (async () => {
+  try {
+    const data = await chrome.storage.local.get([RESULTS_STORAGE_KEY]);
+    if (Array.isArray(data[RESULTS_STORAGE_KEY]) && !state.results.length) {
+      state.results = data[RESULTS_STORAGE_KEY];
+    }
+  } catch (e) {
+    console.error('[PersonaHarvester] restore results failed', e);
+  }
+})();
+
+// Serialised writes so concurrent saves can't clobber each other or interleave.
+let persistQueue = Promise.resolve();
+function persistResults() {
+  persistQueue = persistQueue
+    .then(() => chrome.storage.local.set({ [RESULTS_STORAGE_KEY]: state.results }))
+    .catch(e => console.error('[PersonaHarvester] persist results failed', e));
+}
 
 // ── Tab helpers ──────────────────────────────────────────────────────────────
 
@@ -293,9 +322,11 @@ async function runSimulatedChat(persona, chat, personaName, batchIndex, chatInde
     log(`${personaName} chat ${chatIndex + 1}, turn ${turn + 1}/${target}: ${humanText.slice(0, 60)}…`);
 
     let reply = '';
+    let ads = [];
     try {
       const res = await sendToContent(state.tabId, { action: 'SEND_MESSAGE', text: humanText });
       reply = res.reply || '';
+      ads = Array.isArray(res.ads) ? res.ads : [];
     } catch (e) {
       log(`${personaName} chat ${chatIndex + 1}, turn ${turn + 1} — SEND_MESSAGE failed: ${e.message}`);
       return;
@@ -303,9 +334,12 @@ async function runSimulatedChat(persona, chat, personaName, batchIndex, chatInde
 
     state.results.push({
       batchIndex, personaName, chatIndex, turnIndex: turn,
-      promptIndex: turn, prompt: humanText, reply, timestamp: Date.now(),
+      promptIndex: turn, prompt: humanText, reply, ads, timestamp: Date.now(),
       verification,
     });
+    // Back up progress immediately so a crash/eviction can't lose this turn.
+    persistResults();
+    if (ads.length) log(`${personaName} chat ${chatIndex + 1}, turn ${turn + 1} — ${ads.length} ad(s) detected in response.`);
     log(`${personaName} chat ${chatIndex + 1}, turn ${turn + 1} — reply received.`);
 
     // The simulator's own message is its "assistant" output; ChatGPT's reply is the
@@ -339,6 +373,49 @@ async function runPersona(persona, batchIndex, personaName, config) {
   }
 }
 
+// ── Project naming ───────────────────────────────────────────────────────────
+// ChatGPT could plausibly flag the mechanical "Persona #1, #2, #3…" naming pattern as
+// automation. Instead we build a natural, human-looking project title locally (no API
+// cost): derive a short topic from the persona's first chat criterion when one exists,
+// otherwise fall back to a curated pool of ordinary personal-project names. Titles are
+// kept unique within a run so each project can still be reopened by exact name.
+
+const NAME_FALLBACK_POOL = [
+  'Weekend plans', 'Meal ideas', 'Trip planning', 'Budget help', 'Resume tweaks',
+  'Home projects', 'Reading list', 'Workout plan', 'Gift ideas', 'Study notes',
+  'Recipe help', 'Garden ideas', 'Job search', 'Car stuff', 'Tech questions',
+  'Money questions', 'Travel notes', 'Health questions', 'Writing help', 'DIY ideas',
+];
+
+// Strip leading framing verbs ("ask about", "help me with", "tips on", …) so the topic
+// itself becomes the title, the way a person would name it.
+const STOP_VERBS = /^(ask(ing)?( about)?|help( me)?( with)?|get(ting)?( advice on| help with)?|talk(ing)?( about)?|discuss(ing)?|learn(ing)?( about)?|find(ing)? out( about)?|advice on|tips? (on|for)|questions? about|how to|need(ing)? help with)\s+/i;
+
+function titleCaseShort(text, maxWords = 4) {
+  const words = text.trim().replace(/[.?!,;:]+$/, '').split(/\s+/).filter(Boolean).slice(0, maxWords);
+  if (!words.length) return '';
+  const s = words.join(' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function deriveNameFromCriterion(criterion) {
+  const c = (criterion || '').trim().replace(STOP_VERBS, '');
+  return titleCaseShort(c, 4);
+}
+
+// Build a unique, natural-looking project title for a persona. `used` tracks names
+// already taken in this run; collisions get a low, human-plausible suffix.
+function makeProjectName(persona, used) {
+  const firstCrit = (persona.chats || []).find(c => (c.criterion || '').trim());
+  let base = firstCrit ? deriveNameFromCriterion(firstCrit.criterion) : '';
+  if (!base) base = NAME_FALLBACK_POOL[Math.floor(Math.random() * NAME_FALLBACK_POOL.length)];
+
+  let name = base, n = 2;
+  while (used.has(name.toLowerCase())) name = `${base} ${n++}`;
+  used.add(name.toLowerCase());
+  return name;
+}
+
 async function runAllPersonas(personas, config) {
   log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}${config.noDelays ? ', NO DELAYS' : config.testingMode ? ', testing mode ON' : ''}`);
   await ensureChatGPTTab();
@@ -349,10 +426,11 @@ async function runAllPersonas(personas, config) {
     log(`SET_CONFIG failed (${e.message}) — reload the ChatGPT tab to apply timing mode.`);
   }
 
+  const usedNames = new Set();
   for (let bi = 0; bi < personas.length; bi++) {
     if (!state.running) break;
     state.currentBatchIndex = bi;
-    const personaName = `Persona #${config.personaStartIndex + bi}`;
+    const personaName = makeProjectName(personas[bi], usedNames);
 
     log(`── Persona ${bi + 1}/${personas.length}: creating project "${personaName}" ──`);
     try {
@@ -419,6 +497,9 @@ function log(msg) {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
+    // Make sure any persisted results from a previous session are loaded before we
+    // read, clear, or append to state.results.
+    await restorePromise;
     switch (msg.type) {
       case 'START': {
         if (state.running) { sendResponse({ ok: false, error: 'Already running' }); return; }
@@ -429,6 +510,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         state.running = true;
         state.currentBatchIndex = 0;
         state.results = [];
+        persistResults();
         sendResponse({ ok: true });
         runAllPersonas(msg.personas, msg.config).catch(err => {
           log('Fatal error: ' + err.message);
@@ -447,6 +529,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       case 'CLEAR_RESULTS': {
         state.results = [];
+        persistResults();
         sendResponse({ ok: true });
         break;
       }

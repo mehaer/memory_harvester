@@ -345,6 +345,33 @@ textarea {
 .verdict-flagged { border-left: 3px solid #e5534b; }
 .verdict-flagged .verify-badge { color: #e5534b; }
 
+/* ── Detected advertisements (results) ───────────────────────────────────── */
+.ads {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #d29922;
+  background: #d2992211;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.ad-badge {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #d2992233;
+  color: #d29922;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ad-item {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ad-item + .ad-item { margin-top: 3px; }
+.ad-item a { color: var(--accent); }
+
 /* ── Testing mode toggle ─────────────────────────────────────────────────── */
 .toggle-label {
   display: flex;
