@@ -418,13 +418,11 @@ function makeProjectName(persona, used) {
 
 async function runAllPersonas(personas, config) {
   log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}${config.noDelays ? ', NO DELAYS' : config.testingMode ? ', testing mode ON' : ''}`);
+  // Write flags to storage BEFORE touching the tab so every content script
+  // instance (including ones auto-injected after navigation) reads the right values.
+  await chrome.storage.local.set({ harvesterNoDelays: !!config.noDelays, harvesterTestingMode: !!config.testingMode });
   await ensureChatGPTTab();
   await ensureContentScript();
-  try {
-    await sendToContent(state.tabId, { action: 'SET_CONFIG', testingMode: !!config.testingMode, noDelays: !!config.noDelays });
-  } catch (e) {
-    log(`SET_CONFIG failed (${e.message}) — reload the ChatGPT tab to apply timing mode.`);
-  }
 
   const usedNames = new Set();
   for (let bi = 0; bi < personas.length; bi++) {
@@ -433,10 +431,29 @@ async function runAllPersonas(personas, config) {
     const personaName = makeProjectName(personas[bi], usedNames);
 
     log(`── Persona ${bi + 1}/${personas.length}: creating project "${personaName}" ──`);
+
+    // Listen for tab navigation BEFORE sending CREATE_PROJECT so we never miss the event.
+    // content.js responds immediately after clicking Create (before navigation), so the
+    // message channel stays open. We then wait here for the new page to finish loading.
+    let navResolve;
+    const navDone = new Promise(res => { navResolve = res; });
+    function navListener(tabId_, info) {
+      if (tabId_ === state.tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(navListener);
+        navResolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(navListener);
+
     try {
       await sendToContent(state.tabId, { action: 'CREATE_PROJECT', name: personaName });
-      log(`Project "${personaName}" created.`);
+      log(`Project "${personaName}" created — waiting for page navigation…`);
+      await Promise.race([navDone, sleep(10000)]); // up to 10 s for navigation
+      await sleep(500); // let the new page settle
+      await ensureContentScript();
+      log(`Project "${personaName}" ready.`);
     } catch (e) {
+      chrome.tabs.onUpdated.removeListener(navListener);
       log(`Project "${personaName}" creation failed: ${e.message} — skipping this persona.`);
       continue;
     }

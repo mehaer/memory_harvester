@@ -25,6 +25,16 @@ function escapeRegex(s) {
 let testingMode = false;
 let noDelays = false;
 
+// Read the current run config from storage. Called at the start of each action so
+// the flags are always fresh even after a page navigation resets this module.
+async function refreshConfig() {
+  try {
+    const r = await chrome.storage.local.get(['harvesterNoDelays', 'harvesterTestingMode']);
+    noDelays = !!r.harvesterNoDelays;
+    testingMode = !!r.harvesterTestingMode;
+  } catch (_) {}
+}
+
 // Box-Muller: returns a sample from the standard normal N(0,1)
 function gaussianRandom() {
   let u;
@@ -475,7 +485,6 @@ async function clickCreateProject() {
   bgLog('clickCreateProject: button enabled, clicking…');
   await sleep(humanClickDelay());
   dispatchRealClick(btn);
-  await new Promise(r => setTimeout(r, 1500));
   bgLog('clickCreateProject: clicked Create.');
 }
 
@@ -487,12 +496,8 @@ async function createProject(name) {
   await typeProjectName(name);
   await setProjectOnlyMemory();
   await clickCreateProject();
-
-  // Wait for the page to navigate away from /projects and show a chat input.
-  // The exact URL after creation varies, so we just wait for the textarea.
-  bgLog('createProject: waiting for chat input after project creation…');
-  await waitForElement(SELECTORS.input, 30000);
-  bgLog(`createProject: project "${name}" created and chat input ready.`);
+  // Respond immediately — the browser queues the navigation asynchronously so the
+  // message channel is still open at this point. background.js waits for the new page.
 }
 
 // Find the leaf text node whose own text exactly matches `name` — used instead of
@@ -565,16 +570,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try {
       switch (msg.action) {
         case 'CREATE_PROJECT': {
+          await refreshConfig();
           await createProject(msg.name);
           sendResponse({ ok: true });
           break;
         }
         case 'OPEN_PROJECT_NEW_CHAT': {
+          await refreshConfig();
           await openProjectAndStartNewChat(msg.name);
           sendResponse({ ok: true });
           break;
         }
         case 'SEND_MESSAGE': {
+          await refreshConfig();
           await sendMessage(msg.text);
           await waitForResponseComplete();
           const reply = getLastAssistantMessage();
