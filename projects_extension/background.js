@@ -314,7 +314,7 @@ async function runSimulatedChat(persona, chat, personaName, batchIndex, chatInde
     messages.push({ role: 'user', content: reply });
 
     if (ended) { log(`${personaName} chat ${chatIndex + 1}: simulator wrapped up early.`); return; }
-    if (turn < target - 1) await sleep(config.testingMode ? 3000 : 8000);
+    if (turn < target - 1 && !config.noDelays) await sleep(config.testingMode ? 3000 : 8000);
   }
 }
 
@@ -332,7 +332,7 @@ async function runPersona(persona, batchIndex, personaName, config) {
         log(`Opening new chat in "${personaName}" failed: ${e.message} — skipping remaining chats.`);
         return;
       }
-      await sleep(config.testingMode ? 5000 : 12000);
+      if (!config.noDelays) await sleep(config.testingMode ? 5000 : 12000);
     }
 
     await runSimulatedChat(persona, persona.chats[ci], personaName, batchIndex, ci, config);
@@ -340,11 +340,11 @@ async function runPersona(persona, batchIndex, personaName, config) {
 }
 
 async function runAllPersonas(personas, config) {
-  log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}${config.testingMode ? ', testing mode ON' : ''}`);
+  log(`Starting: ${personas.length} persona(s), model=${SIMULATOR_MODEL}${config.noDelays ? ', NO DELAYS' : config.testingMode ? ', testing mode ON' : ''}`);
   await ensureChatGPTTab();
   await ensureContentScript();
   try {
-    await sendToContent(state.tabId, { action: 'SET_CONFIG', testingMode: !!config.testingMode });
+    await sendToContent(state.tabId, { action: 'SET_CONFIG', testingMode: !!config.testingMode, noDelays: !!config.noDelays });
   } catch (e) {
     log(`SET_CONFIG failed (${e.message}) — reload the ChatGPT tab to apply timing mode.`);
   }

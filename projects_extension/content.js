@@ -23,6 +23,7 @@ function escapeRegex(s) {
 // ── Human-timing simulation ──────────────────────────────────────────────────
 
 let testingMode = false;
+let noDelays = false;
 
 // Box-Muller: returns a sample from the standard normal N(0,1)
 function gaussianRandom() {
@@ -45,6 +46,7 @@ function lognormalMs(meanMs, cv) {
 // Mean = (words / 70 WPM) * 1.3 (30% overhead for reading + thinking).
 // Capped at 90 s so long prompts don't stall the run for minutes.
 function humanTypingDelay(text) {
+  if (noDelays) return 0;
   const words = Math.max(1, text.trim().split(/\s+/).filter(Boolean).length);
   const meanMs = (words / 70) * 1.3 * 60_000;
   return Math.min(90_000, Math.max(1_500, lognormalMs(meanMs, 0.3)));
@@ -53,12 +55,14 @@ function humanTypingDelay(text) {
 // Short fixed delay for UI text fields that aren't real messages (e.g. project name).
 // Mean ~1.5 s, capped at 4 s — just enough to look human.
 function humanShortInputDelay() {
+  if (noDelays) return 0;
   return Math.min(4_000, Math.max(600, lognormalMs(1_500, 0.3)));
 }
 
 // Delay before a button press / UI interaction: mean ~1 s, floored at 300 ms.
 // CV=0.5 gives a wider spread — some clicks are quick, some involve a pause.
 function humanClickDelay() {
+  if (noDelays) return 0;
   return Math.max(300, lognormalMs(1000, 0.5));
 }
 
@@ -521,7 +525,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
         case 'SET_CONFIG': {
           testingMode = !!msg.testingMode;
-          bgLog(`SET_CONFIG: testingMode=${testingMode}`);
+          noDelays = !!msg.noDelays;
+          bgLog(`SET_CONFIG: testingMode=${testingMode}, noDelays=${noDelays}`);
           sendResponse({ ok: true });
           break;
         }

@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ['cfgPersonaStartIndex']
     .forEach(id => document.getElementById(id).addEventListener('input', saveSettings));
   document.getElementById('cfgTestingMode').addEventListener('change', saveSettings);
+  document.getElementById('cfgNoDelays').addEventListener('change', saveSettings);
 
   // JSON import
   document.getElementById('importFile').addEventListener('change', importFromFile);
@@ -161,6 +162,7 @@ function saveSettings() {
     personaHarvesterSettings: {
       personaStartIndex: document.getElementById('cfgPersonaStartIndex').value,
       testingMode: document.getElementById('cfgTestingMode').checked,
+      noDelays: document.getElementById('cfgNoDelays').checked,
     },
   });
 }
@@ -171,6 +173,7 @@ function loadSettings() {
     if (!s) return;
     if (s.personaStartIndex != null) document.getElementById('cfgPersonaStartIndex').value = s.personaStartIndex;
     if (s.testingMode != null) document.getElementById('cfgTestingMode').checked = s.testingMode;
+    if (s.noDelays != null) document.getElementById('cfgNoDelays').checked = s.noDelays;
   });
 }
 
@@ -258,6 +261,7 @@ function getConfig() {
   return {
     personaStartIndex: parseInt(document.getElementById('cfgPersonaStartIndex').value) || 1,
     testingMode: document.getElementById('cfgTestingMode').checked,
+    noDelays: document.getElementById('cfgNoDelays').checked,
   };
 }
 
